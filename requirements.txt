@@ -54,3 +54,8 @@ easytrader==0.23.7
 # curl_cffi: 模拟浏览器 TLS 指纹，绕过反爬虫（AKShare 依赖）
 akshare>=1.17.86
 curl_cffi>=0.7.0
+# tushare: 专业金融数据平台，作为行情/指标/基础信息的主数据源
+#         配置：instock/config/tushare.json 中设置 token，或环境变量 TUSHARE_TOKEN
+tushare>=1.4.29
+simplejson>=3.17.0
+websocket-client>=1.6.0

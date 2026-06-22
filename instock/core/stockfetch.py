@@ -151,19 +151,141 @@ def fetch_etfs(date):
 def _check_spot_data_valid(data):
     if data is None or len(data) == 0:
         return False
-    # 检查 new_price 列非零比例
     try:
         if 'new_price' in data.columns:
             valid_count = data['new_price'].apply(lambda x: float(x) > 0 if pd.notna(x) else False).sum()
             valid_ratio = valid_count / len(data)
-            return valid_ratio > 0.5  # 至少 50% 有效
+            return valid_ratio > 0.5
     except:
         pass
     return False
 
 
+# 使用 Tushare 抓取当日股票行情数据（优先推荐：稳定、字段全）
+def _fetch_stocks_tushare(date):
+    """通过 Tushare 的 daily + daily_basic + stock_basic 获取当日全量行情数据"""
+    fetcher = tfs.get_fetcher()
+    if not fetcher or not getattr(fetcher, 'enabled', False):
+        return None
+
+    date_str = date.strftime('%Y%m%d') if date else datetime.datetime.now().strftime('%Y%m%d')
+    display_date = date.strftime('%Y-%m-%d') if date else datetime.datetime.now().strftime('%Y-%m-%d')
+
+    try:
+        # 1) 日线行情：open/high/low/close/pre_close/change/pct_chg/vol/amount
+        daily_df = fetcher.call('daily', trade_date=date_str)
+        if daily_df is None or daily_df.empty:
+            logging.warning(f"fetch_stocks(tushare): daily 无数据 ({date_str})")
+            return None
+
+        # 2) 每日指标：turnover_rate/volume_ratio/pe/pe_ttm/pb/total_mv/circ_mv
+        basic_df = fetcher.call('daily_basic', trade_date=date_str)
+        if basic_df is None or basic_df.empty:
+            basic_df = pd.DataFrame(columns=['ts_code'])
+
+        # 3) 股票基础信息：name/industry/list_date
+        info_df = fetcher.call('stock_basic')
+        if info_df is None or info_df.empty:
+            info_df = pd.DataFrame(columns=['ts_code', 'name', 'industry', 'list_date'])
+
+        # 合并
+        df = daily_df.merge(basic_df, on='ts_code', how='left', suffixes=('', '_basic'))
+        df = df.merge(info_df, on='ts_code', how='left')
+
+        # ts_code 转 6 位代码（如 "000001.SZ" → "000001"）
+        df['code'] = df['ts_code'].astype(str).str[:6]
+
+        # 过滤非 A 股（6 位数字代码）
+        df = df[df['code'].str.match(r'^\d{6}$')]
+
+        # 构建结果 DataFrame，按 TABLE_CN_STOCK_SPOT 的列顺序
+        required_cols = list(tbs.TABLE_CN_STOCK_SPOT['columns'].keys())
+
+        # 计算派生字段
+        pre_close_safe = df['pre_close'].replace(0, np.nan)
+        amplitude = ((df['high'] - df['low']) / pre_close_safe * 100).round(2)
+        list_date_formatted = df.get('list_date', '').apply(
+            lambda x: f"{str(x)[:4]}-{str(x)[4:6]}-{str(x)[6:8]}"
+            if pd.notna(x) and len(str(x)) == 8 and str(x).isdigit() else None
+        )
+
+        # 用字典方式构建 DataFrame，避免索引对齐问题
+        out = {
+            'date': display_date,
+            'code': df['code'].values,
+            'name': df.get('name', '').fillna('').values,
+            'new_price': df['close'].values,
+            'change_rate': df['pct_chg'].values,
+            'ups_downs': df['change'].values,
+            # tushare vol 单位是"手"（100股/手），转为股
+            'volume': (df['vol'].fillna(0) * 100).values.astype(np.int64),
+            # tushare amount 单位是"千元"，转为元
+            'deal_amount': (df['amount'].fillna(0) * 1000).values.astype(np.int64),
+            'amplitude': amplitude.values,
+            'turnoverrate': df.get('turnover_rate', 0).fillna(0).values,
+            'volume_ratio': df.get('volume_ratio', 0).fillna(0).values,
+            'open_price': df['open'].values,
+            'high_price': df['high'].values,
+            'low_price': df['low'].values,
+            'pre_close_price': df['pre_close'].values,
+            'speed_increase': 0.0,
+            'speed_increase_5': 0.0,
+            'speed_increase_60': 0.0,
+            'speed_increase_all': 0.0,
+            'dtsyl': df.get('pe', 0).fillna(0).values,
+            'pe9': df.get('pe_ttm', 0).fillna(0).values,
+            'pe': df.get('pe', 0).fillna(0).values,
+            'pbnewmrq': df.get('pb', 0).fillna(0).values,
+            'basic_eps': 0,
+            'bvps': 0,
+            'per_capital_reserve': 0,
+            'per_unassign_profit': 0,
+            'roe_weight': 0,
+            'sale_gpr': 0,
+            'debt_asset_ratio': 0,
+            'total_operate_income': 0,
+            'toi_yoy_ratio': 0,
+            'parent_netprofit': 0,
+            'netprofit_yoy_ratio': 0,
+            'report_date': None,
+            # tushare total_share 单位是"万股"，转为股
+            'total_shares': (df.get('total_share', 0).fillna(0) * 10000).values.astype(np.int64),
+            'free_shares': (df.get('free_share', 0).fillna(0) * 10000).values.astype(np.int64),
+            # tushare total_mv 单位是"千元"，转为元
+            'total_market_cap': (df.get('total_mv', 0).fillna(0) * 1000).values.astype(np.int64),
+            'free_cap': (df.get('circ_mv', 0).fillna(0) * 1000).values.astype(np.int64),
+            'industry': df.get('industry', '').fillna('').values,
+            'listing_date': list_date_formatted.values,
+        }
+        result = pd.DataFrame(out)
+
+        # 调整列顺序并过滤
+        result = result[required_cols]
+        # 过滤停牌股票（new_price 为 0 或 NaN）
+        result = result.loc[result['new_price'].apply(lambda x: pd.notna(x) and float(x) > 0)]
+        result = result.loc[result['code'].apply(is_a_stock)]
+
+        logging.info(f"fetch_stocks: Tushare 行情获取成功 {len(result)} 条")
+        return result
+    except Exception as e:
+        logging.error(f"fetch_stocks(tushare) 处理异常：{e}")
+        return None
+
+
 # 读取当天股票数据
 def fetch_stocks(date):
+    # 0) 优先使用 Tushare（最稳定，字段最全）
+    try:
+        data = _fetch_stocks_tushare(date)
+        if data is not None and len(data) > 0:
+            if _check_spot_data_valid(data):
+                logging.info(f"fetch_stocks: Tushare 成功 {len(data)} 条")
+                return data
+            else:
+                logging.warning("fetch_stocks: Tushare 数据无效，尝试其他数据源")
+    except Exception as e:
+        logging.warning(f"stockfetch.fetch_stocks Tushare 异常：{e}")
+
     # 1) 优先使用新浪实时行情
     try:
         data = sss.stock_zh_a_spot_sina()
