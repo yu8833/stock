@@ -169,6 +169,92 @@ class tushare_fetcher:
         return self.call('daily_basic', ts_code=ts_code,
                          start_date=start_date, end_date=end_date)
 
+    def moneyflow(self, trade_date='', ts_code='', start_date='', end_date=''):
+        """个股资金流向（小单/中单/大单/特大单 买卖量与金额）
+        
+        Args:
+            trade_date: 交易日期，格式 YYYYMMDD（如 '20240621'）
+            ts_code: 股票代码（如 '000001.SZ'），与日期参数至少输入一个
+            start_date: 开始日期
+            end_date: 结束日期
+            
+        Returns:
+            DataFrame 包含：ts_code, trade_date, buy_sm_vol, buy_sm_amount, 
+            sell_sm_vol, sell_sm_amount, buy_md_vol, buy_md_amount, 
+            sell_md_vol, sell_md_amount, buy_lg_vol, buy_lg_amount, 
+            sell_lg_vol, sell_lg_amount, buy_elg_vol, buy_elg_amount, 
+            sell_elg_vol, sell_elg_amount, net_mf_vol, net_mf_amount
+        """
+        kwargs = {}
+        if trade_date:
+            kwargs['trade_date'] = trade_date
+        if ts_code:
+            kwargs['ts_code'] = ts_code
+        if start_date:
+            kwargs['start_date'] = start_date
+        if end_date:
+            kwargs['end_date'] = end_date
+        return self.call('moneyflow', **kwargs)
+
+    def moneyflow_hsgt(self, trade_date=''):
+        """沪港深资金流向（北向/南向资金）
+        
+        Args:
+            trade_date: 交易日期，格式 YYYYMMDD
+            
+        Returns:
+            DataFrame 包含：trade_date, ggt_ss, ggt_sz, hgt, sgt, 
+            north_money, south_money
+        """
+        kwargs = {}
+        if trade_date:
+            kwargs['trade_date'] = trade_date
+        return self.call('moneyflow_hsgt', **kwargs)
+
+    def top_list(self, trade_date=''):
+        """龙虎榜个股列表
+        
+        Args:
+            trade_date: 交易日期，格式 YYYYMMDD
+            
+        Returns:
+            DataFrame 包含：trade_date, ts_code, name, close, pct_change,
+            turnover_rate, amount, l_sell, l_buy, l_amount, net_amount,
+            net_rate, amount_rate, float_values, reason
+        """
+        kwargs = {}
+        if trade_date:
+            kwargs['trade_date'] = trade_date
+        return self.call('top_list', **kwargs)
+
+    def weekly(self, trade_date=''):
+        """每周 IPO 辅导开始
+        
+        Args:
+            trade_date: 交易日期，格式 YYYYMMDD
+            
+        Returns:
+            DataFrame 包含：股票每周重要行为数据
+        """
+        kwargs = {}
+        if trade_date:
+            kwargs['trade_date'] = trade_date
+        return self.call('weekly', **kwargs)
+
+    def monthly(self, trade_date=''):
+        """每月 IPO 辅导
+        
+        Args:
+            trade_date: 交易日期，格式 YYYYMMDD
+            
+        Returns:
+            DataFrame 包含：股票每月重要行为数据
+        """
+        kwargs = {}
+        if trade_date:
+            kwargs['trade_date'] = trade_date
+        return self.call('monthly', **kwargs)
+
     # ------------------------------------------------------------------
     # 内部工具
     # ------------------------------------------------------------------
