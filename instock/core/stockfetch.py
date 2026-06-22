@@ -20,6 +20,10 @@ import instock.core.crawling.stock_fund_em as sff
 import instock.core.crawling.stock_fhps_em as sfe
 import instock.core.crawling.stock_chip_race as scr
 import instock.core.crawling.stock_limitup_reason as slr
+import instock.core.crawling.stock_hist_ts as shts
+import instock.core.crawling.stock_spot_sina as sss
+import instock.core.crawling.stock_spot_akshare as ssa
+import instock.core.tushare_fetcher as tfs
 
 __author__ = 'myh '
 __date__ = '2023/3/10 '
@@ -52,7 +56,10 @@ def is_not_st(name):
 
 # 过滤价格，如果没有基本上是退市了。
 def is_open(price):
-    return not np.isnan(price)
+    try:
+        return not np.isnan(float(price))
+    except (ValueError, TypeError):
+        return False
 
 
 def is_open_with_line(price):
@@ -63,17 +70,66 @@ def is_open_with_line(price):
 def fetch_stocks_trade_date():
     try:
         data = tdh.tool_trade_date_hist_sina()
+        if data is not None and len(data.index) > 0:
+            return set(data['trade_date'].values.tolist())
+        logging.info("新浪交易日历返回空，尝试使用 tushare 作为补充数据源")
+    except Exception as e:
+        logging.warning(f"stockfetch.fetch_stocks_trade_date 新浪调用异常：{e}")
+
+    # 回落到 tushare（若已配置）
+    try:
+        if not tfs.is_enabled():
+            return None
+        data = shts.tool_trade_date_hist_ts()
         if data is None or len(data.index) == 0:
             return None
-        data_date = set(data['trade_date'].values.tolist())
-        return data_date
+        return set(data['trade_date'].values.tolist())
     except Exception as e:
-        logging.error(f"stockfetch.fetch_stocks_trade_date处理异常：{e}")
+        logging.error(f"stockfetch.fetch_stocks_trade_date tushare 处理异常：{e}")
     return None
 
 
-# 读取当天股票数据
+def _ts_hist_to_em_columns(df):
+    """把 stock_zh_a_hist_ts 返回的中文字段重命名为 CN_STOCK_HIST_DATA 的英文字段名。"""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    df.rename(columns={
+        '日期': 'date',
+        '开盘': 'open',
+        '收盘': 'close',
+        '最高': 'high',
+        '最低': 'low',
+        '成交量': 'volume',
+        '成交额': 'amount',
+        '振幅': 'amplitude',
+        '涨跌幅': 'quote_change',
+        '涨跌额': 'ups_downs',
+        '换手率': 'turnover',
+    }, inplace=True)
+    return df
+
+
+# 读取当天ETF基金数据
 def fetch_etfs(date):
+    # 1) 优先使用 AKShare ETF接口
+    try:
+        data = ssa.fund_etf_spot_ak()
+        if data is not None and len(data.index) > 0:
+            if date is None:
+                data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+            else:
+                data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+            # 先插入 date 列（此时 15 列），再设置列名（15 列），避免长度不匹配
+            data.columns = list(tbs.TABLE_CN_ETF_SPOT['columns'])
+            data = data.loc[data['new_price'].apply(is_open)]
+            logging.info(f"fetch_etfs: AKShare ETF获取成功 {len(data)} 条")
+            return data
+        logging.warning("fetch_etfs: AKShare ETF获取失败，尝试东方财富")
+    except Exception as e:
+        logging.warning(f"stockfetch.fetch_etfs AKShare异常：{e}")
+
+    # 2) 回落到东方财富 ETF
     try:
         data = fee.fund_etf_spot_em()
         if data is None or len(data.index) == 0:
@@ -84,6 +140,7 @@ def fetch_etfs(date):
             data.insert(0, 'date', date.strftime("%Y-%m-%d"))
         data.columns = list(tbs.TABLE_CN_ETF_SPOT['columns'])
         data = data.loc[data['new_price'].apply(is_open)]
+        logging.info(f"fetch_etfs: 东方财富 ETF获取成功 {len(data)} 条")
         return data
     except Exception as e:
         logging.error(f"stockfetch.fetch_etfs处理异常：{e}")
@@ -92,19 +149,65 @@ def fetch_etfs(date):
 
 # 读取当天股票数据
 def fetch_stocks(date):
+    # 1) 优先使用新浪实时行情
+    try:
+        data = sss.stock_zh_a_spot_sina()
+        if data is not None and len(data.index) > 0:
+            if date is None:
+                data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+            else:
+                data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+            # 填充缺失的列为 0（新浪数据源字段较少）
+            required_cols = list(tbs.TABLE_CN_STOCK_SPOT['columns'].keys())
+            for col in required_cols:
+                if col not in data.columns:
+                    data[col] = 0
+            # 调整列顺序以匹配表结构
+            data = data[required_cols]
+            data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
+            logging.info(f"fetch_stocks: 新浪实时行情获取成功 {len(data)} 条")
+            return data
+        logging.warning("fetch_stocks: 新浪实时行情获取失败，尝试 AKShare")
+    except Exception as e:
+        logging.warning(f"stockfetch.fetch_stocks 新浪异常：{e}")
+
+    # 2) 回落到 AKShare 实时行情（使用 curl_cffi 绕过反爬，最稳定）
+    try:
+        data = ssa.stock_zh_a_spot_ak()
+        if data is not None and len(data.index) > 0:
+            if date is None:
+                data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+            else:
+                data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+            # 填充缺失的列为 0（AKShare 数据源字段可能较少）
+            required_cols = list(tbs.TABLE_CN_STOCK_SPOT['columns'].keys())
+            for col in required_cols:
+                if col not in data.columns:
+                    data[col] = 0
+            data = data[required_cols]
+            data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
+            logging.info(f"fetch_stocks: AKShare 实时行情获取成功 {len(data)} 条")
+            return data
+        logging.warning("fetch_stocks: AKShare 实时行情获取失败，尝试东方财富")
+    except Exception as e:
+        logging.warning(f"stockfetch.fetch_stocks AKShare 异常：{e}")
+
+    # 3) 最后回落到东方财富实时行情（东财 API 目前被封禁，优先使用前两个数据源）
     try:
         data = she.stock_zh_a_spot_em()
-        if data is None or len(data.index) == 0:
-            return None
-        if date is None:
-            data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
-        else:
-            data.insert(0, 'date', date.strftime("%Y-%m-%d"))
-        data.columns = list(tbs.TABLE_CN_STOCK_SPOT['columns'])
-        data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
-        return data
+        if data is not None and len(data.index) > 0:
+            if date is None:
+                data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+            else:
+                data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+            data.columns = list(tbs.TABLE_CN_STOCK_SPOT['columns'])
+            data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
+            logging.info(f"fetch_stocks: 东方财富实时行情获取成功 {len(data)} 条")
+            return data
+        logging.error("fetch_stocks: 东方财富实时行情获取失败，所有数据源均不可用")
     except Exception as e:
-        logging.error(f"stockfetch.fetch_stocks处理异常：{e}")
+        logging.error(f"stockfetch.fetch_stocks 东方财富异常：{e}")
+
     return None
 
 
@@ -379,11 +482,60 @@ def stock_hist_cache(code, date_start, date_end=None, is_cache=True, adjust=''):
         if os.path.isfile(cache_file):
             return pd.read_pickle(cache_file, compression="gzip")
         else:
+            # 1. 优先使用新浪接口 (ak.stock_zh_a_daily) —— 东财被封后最稳定的接口
             if date_end is not None:
-                stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, end_date=date_end,
-                                            adjust=adjust)
+                stock = ssa.stock_zh_a_hist_ak_sina(
+                    symbol=code, period="daily",
+                    start_date=date_start, end_date=date_end,
+                    adjust=adjust if adjust else "qfq"
+                )
             else:
-                stock = she.stock_zh_a_hist(symbol=code, period="daily", start_date=date_start, adjust=adjust)
+                stock = ssa.stock_zh_a_hist_ak_sina(
+                    symbol=code, period="daily",
+                    start_date=date_start,
+                    adjust=adjust if adjust else "qfq"
+                )
+
+            # 2. 新浪接口失败时回落到 AKShare curl_cffi（如东财接口恢复）
+            if stock is None or len(stock.index) == 0:
+                try:
+                    logging.info(f"{code} 新浪历史K线无数据，回落 AKShare")
+                    stock = ssa.stock_zh_a_hist_ak(
+                        symbol=code, period="daily",
+                        start_date=date_start,
+                        end_date=date_end if date_end else None,
+                        adjust=adjust if adjust else "qfq"
+                    )
+                except Exception as e:
+                    logging.warning(f"{code} AKShare 回退获取失败: {e}")
+
+            # 3. AKShare 失败时回落到 tushare（若已配置）
+            if (stock is None or len(stock.index) == 0) and tfs.is_enabled():
+                try:
+                    logging.info(f"{code} AKShare 无数据，回落到 tushare 获取日行情")
+                    stock_raw = shts.stock_zh_a_hist_ts(
+                        symbol=code,
+                        start_date=date_start,
+                        end_date=date_end if date_end else datetime.date.today().strftime("%Y%m%d"),
+                    )
+                    stock = _ts_hist_to_em_columns(stock_raw)
+                except Exception as e:
+                    logging.warning(f"{code} tushare 回退获取失败: {e}")
+
+            # 4. 最后回落到东方财富（东财 API 目前被封）
+            if stock is None or len(stock.index) == 0:
+                try:
+                    logging.info(f"{code} 无数据，回落到东方财富获取日行情")
+                    stock_raw = she.stock_zh_a_hist(
+                        symbol=code, period="daily",
+                        start_date=date_start,
+                        end_date=date_end if date_end else None,
+                        adjust=adjust
+                    )
+                    if stock_raw is not None and not stock_raw.empty:
+                        stock = stock_raw
+                except Exception as e:
+                    logging.warning(f"{code} 东方财富回退获取失败: {e}")
 
             if stock is None or len(stock.index) == 0:
                 return None
@@ -394,7 +546,6 @@ def stock_hist_cache(code, date_start, date_end=None, is_cache=True, adjust=''):
                     stock.to_pickle(cache_file, compression="gzip")
             except Exception:
                 pass
-            # time.sleep(1)
             return stock
     except Exception as e:
         logging.error(f"stockfetch.stock_hist_cache处理异常：{code}代码{e}")

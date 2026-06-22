@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
 Date: 2022/10/1 19:27
@@ -6,13 +6,19 @@ Desc: 新浪财经-交易日历
 https://finance.sina.com.cn/realstock/company/klc_td_sh.txt
 此处可以用来更新 calendar.json 文件，注意末尾没有 "," 号
 """
+
 import datetime
 import pandas as pd
-import requests
 from py_mini_racer import MiniRacer
-from instock.core.singleton_proxy import proxys
+from instock.core.eastmoney_fetcher import get_fetcher
 
-hk_js_decode = """
+__author__ = 'myh '
+__date__ = '2026/06/21 '
+
+fetcher = get_fetcher()
+
+# 新浪返回的 js 文本被加密，需要用此 JS 片段解码
+HK_JS_DECODE = """
 function d(t) {
     var e, i, n, r, a, o, s, l = (arguments,
             864e5), u = 7657, c = [], h = [], d = ~(3 << 30), f = 1 << 30,
@@ -244,7 +250,7 @@ function d(t) {
                          e = 0; 5 > e; e++)
                     l & 1 << 4 - e && i.l_l[e]++,
                         i.l_l[e] *= 3;
-                i.d_v = w(i.l_l, [1, 0, 0, 1, 1], [0, 0, 0, 0, 1]),
+                    i.d_v = w(i.l_l, [1, 0, 0, 1, 1], [0, 0, 0, 0, 1]),
                     o = r.cd + i.d_v[0],
                     n.open = o / r.m,
                     n.high = (o + i.d_v[1]) / r.m,
@@ -304,29 +310,22 @@ function d(t) {
 
 
 def tool_trade_date_hist_sina() -> pd.DataFrame:
-    """
-    交易日历-历史数据
-    https://finance.sina.com.cn/realstock/company/klc_td_sh.txt
-    :return: 交易日历
-    :rtype: pandas.DataFrame
-    """
+    """交易日历-历史数据"""
     url = "https://finance.sina.com.cn/realstock/company/klc_td_sh.txt"
-    r = requests.get(url, proxies = proxys().get_proxies())
+    r = fetcher.make_request(url, timeout=30)
     js_code = MiniRacer()
-    js_code.eval(hk_js_decode)
-    dict_list = js_code.call(
-        "d", r.text.split("=")[1].split(";")[0].replace('"', "")
-    )  # 执行js解密代码
+    js_code.eval(HK_JS_DECODE)
+    dict_list = js_code.call("d", r.text.split("=")[1].split(";")[0].replace('"', ""))
     temp_df = pd.DataFrame(dict_list)
     temp_df.columns = ["trade_date"]
-    temp_df["trade_date"] = pd.to_datetime(temp_df["trade_date"]).dt.date
+    temp_df["trade_date"] = pd.to_datetime(temp_df["trade_date"], errors="coerce").dt.date
     temp_list = temp_df["trade_date"].to_list()
-    temp_list.append(datetime.date(1992, 5, 4))  # 是交易日但是交易日历缺失该日期
+    temp_list.append(datetime.date(1992, 5, 4))
+    temp_list = [d for d in temp_list if d is not None]
     temp_list.sort()
     temp_df = pd.DataFrame(temp_list, columns=["trade_date"])
     return temp_df
 
 
 if __name__ == "__main__":
-    tool_trade_date_hist_df = tool_trade_date_hist_sina()
-    print(tool_trade_date_hist_df)
+    print(tool_trade_date_hist_sina())

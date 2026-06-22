@@ -57,7 +57,8 @@ def main():
         logging.error("执行信息：数据库不存在，将创建。")
         # 检查数据库失败，
         create_new_database()
-    # 执行数据初始化。
+    # 即使数据库已存在（如 docker-compose 预建），仍确保基础表已创建
+    create_new_base_table()
 
 
 # main函数入口

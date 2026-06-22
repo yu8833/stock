@@ -1,18 +1,56 @@
+# ============================================================
+# instock 依赖包
+# 安装方式：
+#   基础安装（数据抓取 / 回测 / 指标计算）：
+#     pip install -r requirements.txt
+#
+#   若 TA_Lib 安装失败（需要系统级 C 库），先装：
+#     # macOS (Intel)
+#     brew install ta-lib
+#     # macOS (Apple Silicon M1/M2/M3)
+#     brew install ta-lib  # 可能需要从源码编译
+#     # Linux (Ubuntu/Debian)
+#     sudo apt-get install libta-lib0 libta-lib-dev
+#     pip install TA_Lib==0.6.8
+#
+#   若不需要交易模块，忽略 easytrader 相关报错
+# ============================================================
+
+# ---------- 必装：核心依赖 ----------
 numpy==2.4.1
 pandas==2.3.3
-py_mini_racer==0.6.0
-mini-racer==0.13.2
-TA_Lib==0.6.8
-arrow==1.4.0
-bokeh==3.8.1
-PyMySQL==1.1.2
 requests==2.32.5
-Logbook==1.9.2
+urllib3==2.6.3
+PyMySQL==1.1.2
 SQLAlchemy==2.0.45
 tornado==6.5.4
 tqdm==4.67.1
-urllib3==2.6.3
-easytrader==0.23.7
 beautifulsoup4==4.14.3
 pycryptodome==3.23.0
 python_dateutil==2.9.0.post0
+Logbook==1.9.2
+arrow==1.4.0
+bokeh==3.8.1
+
+# JS 解码（用于解析新浪交易日历加密 JS）
+py_mini_racer==0.6.0
+mini-racer==0.13.2
+
+# ---------- 可选：技术指标 ----------
+# 需要系统级 ta-lib 库，安装困难。
+# 若不装则 K 线指标 / 回测模块无法运行（import talib 会报错）。
+# 安装步骤（任选其一）：
+#   1. macOS: brew install ta-lib && pip install TA_Lib==0.6.8
+#   2. Ubuntu/Debian: sudo apt-get install libta-lib0 libta-lib-dev && pip install TA_Lib==0.6.8
+#   3. Windows: 下载预编译 wheel 后 pip install TA_Lib‑0.4.28‑cp311‑cp311‑win_amd64.whl
+TA_Lib==0.6.8
+
+# ---------- 可选：交易自动化 ----------
+# 仅在 instock/trade/ 模块中使用；不需要自动交易的可以跳过。
+easytrader==0.23.7
+
+# ---------- 可选：增强数据源 (AKShare) ----------
+# AKShare: 丰富的金融数据接口，支持 A股、基金、期货等
+# curl_cffi: 模拟浏览器 TLS 指纹，绕过反爬虫（AKShare 依赖）
+akshare>=1.17.86
+curl_cffi>=0.7.0

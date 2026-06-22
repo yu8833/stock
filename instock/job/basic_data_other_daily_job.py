@@ -296,6 +296,7 @@ def stock_imitup_reason_data(date):
 
 def main():
     runt.run_with_args(save_nph_stock_lhb_data)
+    runt.run_with_args(save_nph_stock_top_data)
     runt.run_with_args(save_nph_stock_bonus)
     runt.run_with_args(save_nph_stock_fund_flow_data)
     runt.run_with_args(save_nph_stock_sector_fund_flow_data)

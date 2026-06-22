@@ -1,64 +1,47 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os.path
+import os
 import sys
-import random
 from instock.lib.singleton_type import singleton_type
 
-# 在项目运行时，临时将项目路径添加到环境变量
+# 临时将项目路径加入环境变量，便于脚本方式运行
 cpath_current = os.path.dirname(os.path.dirname(__file__))
 cpath = os.path.abspath(os.path.join(cpath_current, os.pardir))
 sys.path.append(cpath)
 proxy_filename = os.path.join(cpath_current, 'config', 'proxy.txt')
 
 __author__ = 'myh '
-__date__ = '2025/1/6 '
+__date__ = '2026/06/21 '
 
 
-# 读取代理
 class proxys(metaclass=singleton_type):
+    """
+    代理池管理。
+    - 从 config/proxy.txt 读取代理；留空即走直连
+    - 不做健康检查（上层调用方会在失败时标记坏代理）
+    """
+
     def __init__(self):
+        self.data = []
         try:
             with open(proxy_filename, "r") as file:
-                self.data = list(set(line.strip() for line in file.readlines() if line.strip()))
+                for line in file:
+                    line = line.strip()
+                    # 空行 / 注释 行 跳过
+                    if not line or line.startswith('#'):
+                        continue
+                    self.data.append(line)
         except Exception:
-           pass
+            # 文件不存在也属于"直连模式"，无需报错
+            pass
+        self.data = list(set(self.data))  # 去重
 
     def get_data(self):
         return self.data
 
     def get_proxies(self):
-        if self.data is None or len(self.data)==0:
+        """返回 requests 可用的 proxies dict；无代理时返回 None"""
+        if not self.data:
             return None
-
-        proxy = random.choice(self.data)
-        return {"http": proxy, "https": proxy}
-
-"""
-    def get_proxies(self):
-        if self.data is None:
-            return None
-
-        while len(self.data) > 0:
-            proxy = random.choice(self.data)
-            if https_validator(proxy):
-                return {"http": proxy, "https": proxy}
-            self.data.remove(proxy)
-
-        return None
-
-
-from requests import head
-def https_validator(proxy):
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:34.0) Gecko/20100101 Firefox/34.0',
-               'Accept': '*/*',
-               'Connection': 'keep-alive',
-               'Accept-Language': 'zh-CN,zh;q=0.8'}
-    proxies = {"http": f"{proxy}", "https": f"{proxy}"}
-    try:
-        r = head("https://data.eastmoney.com", headers=headers, proxies=proxies, timeout=3, verify=False)
-        return True if r.status_code == 200 else False
-    except Exception as e:
-        return False
-"""
+        return {"http": self.data[0], "https": self.data[0]}

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
 Date: 2025/2/26 12:18
@@ -7,26 +7,22 @@ http://zx.10jqka.com.cn/event/api/getharden/date/2025-02-21/orderby/date/orderwa
 """
 
 import pandas as pd
-import requests
-import re
 import numpy as np
-from instock.core.singleton_proxy import proxys
+from instock.core.eastmoney_fetcher import get_fetcher
 
 __author__ = 'myh '
-__date__ = '2025/5/9 '
+__date__ = '2026/06/21 '
+
+fetcher = get_fetcher()
+
 
 def stock_limitup_reason(date: str = "2025-02-27") -> pd.DataFrame:
     """
     同花顺涨停原因
-    http://zx.10jqka.com.cn/event/api/getharden/date/2025-02-27/orderby/date/orderway/desc/charset/GBK/
-    :return: 涨停原因
-    :rtype: pandas.DataFrame
     """
+    import re
     url = f"http://zx.10jqka.com.cn/event/api/getharden/date/{date}/orderby/date/orderway/desc/charset/GBK/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36 Thx"
-    }
-    r = requests.get(url, proxies = proxys().get_proxies(), headers=headers)
+    r = fetcher.make_request(url, timeout=15)
     data_json = r.json()
 
     data = data_json["data"]
@@ -34,7 +30,7 @@ def stock_limitup_reason(date: str = "2025-02-27") -> pd.DataFrame:
         return pd.DataFrame()
 
     temp_df = pd.DataFrame(data)
-    if len(temp_df.columns)<7:
+    if len(temp_df.columns) < 7:
         temp_df.columns = [
             "ID",
             "名称",
@@ -68,7 +64,7 @@ def stock_limitup_reason(date: str = "2025-02-27") -> pd.DataFrame:
         ]
 
     temp_df["详因"] = temp_df.apply(stock_limitup_detail, axis=1)
-    temp_df["换手率"] = round(temp_df["换手率"], 2)
+    temp_df["换手率"] = pd.to_numeric(temp_df["换手率"], errors="coerce").round(2)
     temp_df = temp_df[
         [
             "日期",
@@ -85,7 +81,6 @@ def stock_limitup_reason(date: str = "2025-02-27") -> pd.DataFrame:
             "DDE",
         ]
     ]
-
     return temp_df
 
 
@@ -93,30 +88,25 @@ def stock_limitup_detail(row):
     """
     同花顺涨停详因
     http://zx.10jqka.com.cn/event/harden/stockreason/id/70870005
-    :return: 涨停详因
-    :rtype: pandas.DataFrame
     """
+    import re
     url = f"http://zx.10jqka.com.cn/event/harden/stockreason/id/{row['ID']}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"
-    }
-    r = requests.get(url, proxies = proxys().get_proxies(), headers=headers)
+    try:
+        r = fetcher.make_request(url, timeout=15)
+    except Exception:
+        return ""
     data_text = r.text
-
-    # match_title = re.search(r"var title = '(.*?)';", data_text)
-    # _title = ""
-    # if match_title:
-    #     _title = match_title.group(1)
-
     pattern_data = re.search(r"var data = '(.*?)';", data_text)
     _data = ""
     if pattern_data:
-        _data = pattern_data.group(1).replace("&lt;spanclass=&quot;hl&quot;&gt;", "").replace("&lt;/span&gt;", "").replace("&amp;quot;", "\"")
+        _data = (
+            pattern_data.group(1)
+            .replace("&lt;spanclass=&quot;hl&quot;&gt;", "")
+            .replace("&lt;/span&gt;", "")
+            .replace("&amp;quot;", '"')
+        )
     return _data
 
-    # reason = f"{_title}\r\n{_data}"
-
-    # return reason
 
 if __name__ == "__main__":
     stock_limitup_reason_df = stock_limitup_reason()

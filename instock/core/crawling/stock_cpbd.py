@@ -3,13 +3,13 @@
 
 import pandas as pd
 import instock.core.tablestructure as tbs
-from instock.core.eastmoney_fetcher import eastmoney_fetcher
+from instock.core.eastmoney_fetcher import get_fetcher
 
 __author__ = 'myh '
 __date__ = '2025/12/31 '
 
 # 创建全局实例，供所有函数使用
-fetcher = eastmoney_fetcher()
+fetcher = get_fetcher()
 
 def stock_cpbd_em(symbol: str = "688041") -> pd.DataFrame:
     """

@@ -158,4 +158,5 @@ cython_debug/
 .idea/
 
 gf_client.json
+tushare.json
 

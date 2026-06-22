@@ -1,31 +1,85 @@
-version: '4.0.0'
+# instock 部署用 docker-compose
+# 用法（项目根目录执行）：
+#   1) 首次启动（构建 + 运行）:
+#        docker compose -f docker/docker-compose.yml up -d --build
+#   2) 查看日志:
+#        docker compose -f docker/docker-compose.yml logs -f instock
+#   3) 停止:
+#        docker compose -f docker/docker-compose.yml down
+#
+# 说明：
+#   - .env 放在项目根目录（与 docker/ 同级），compose 会自动读取
+#   - build context = 项目根目录
+#   - 所有数据卷放在 ./docker/data/ 下，重启容器不丢数据
+#   - 首次启动：mariadb 会自动创建 instockdb 数据库
 
 services:
-  instockdbservice:
-    image: library/mariadb:latest
-    container_name: InStockDbService
+  mariadb:
+    image: mariadb:11
+    container_name: instock-db
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-root}
+      MARIADB_DATABASE: instockdb
+      MARIADB_USER: ${MARIADB_USER:-instock}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-instock}
+      TZ: Asia/Shanghai
+    command: --bind-address=0.0.0.0
     volumes:
-      - /data/mariadb/data:/var/lib/instockdb
+      # 数据文件持久化
+      - ${INSTOCK_VOLUME_ROOT:-../data}/mariadb:/var/lib/mysql
+    ports:
+      - "127.0.0.1:${MARIADB_PORT:-3307}:3306"
+    healthcheck:
+      test: [
+        "CMD-SHELL",
+        "mariadb-admin --user=root --password=${MARIADB_ROOT_PASSWORD:-root} ping || exit 1"
+      ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     networks:
-      - instock_network
+      - instock_net
 
   instock:
-    image: mayanghua/instock:latest
-    container_name: InStock
-    ports:
-      - "9988:9988"
-    environment:
-      db_host: InStockDbService
-    volumes:
-      - /data/instockproxy.txt:/data/InStock/instock/config/proxy.txt
+    build:
+      # Dockerfile 在 ./docker 目录，构建上下文为项目根目录 (..)
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: instock:latest
+    container_name: instock-app
+    restart: unless-stopped
+    # 使用 bridge 网络 + 端口映射（兼容 macOS Docker Desktop）
     depends_on:
-      - instockdbservice
+      mariadb:
+        condition: service_healthy
+    environment:
+      # MySQL 连接信息（同 compose 网络内通过服务名 mariadb 访问）
+      db_host: mariadb
+      db_port: 3306
+      db_user: ${MARIADB_USER:-instock}
+      db_password: ${MARIADB_PASSWORD:-instock}
+      db_database: instockdb
+      # tushare 会员 token（可选，有了则可作为东财的备选数据源）
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
+      # 运行环境
+      TZ: Asia/Shanghai
+      PYTHONPATH: /data/InStock
+    ports:
+      - "127.0.0.1:9988:9988"
     networks:
-      - instock_network
+      - instock_net
+    volumes:
+      # 日志与缓存目录持久化（相对于 compose 文件所在目录 docker/）
+      - ${INSTOCK_VOLUME_ROOT:-../data}/instock/log:/data/InStock/instock/log
+      - ${INSTOCK_VOLUME_ROOT:-../data}/instock/cache:/data/InStock/instock/cache
+      # 配置目录整体挂入（相对于 compose 文件所在目录 docker/；修改后 docker compose restart 生效）
+      - type: bind
+        source: ../instock/config
+        target: /data/InStock/instock/config
+        read_only: true
 
 networks:
-  instock_network:
+  instock_net:
     driver: bridge
-

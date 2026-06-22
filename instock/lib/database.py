@@ -86,16 +86,20 @@ def insert_other_db_from_df(to_db, data, table_name, cols_type, write_index, pri
     if write_index:
         # 插入到第一个位置：
         col_name_list.insert(0, data.index.name)
+
+    # 检查表是否存在：不存在时用 replace 首次建表（只执行一次）
+    table_exists = ipt.has_table(table_name, schema=to_db)
+    if_exists = 'replace' if not table_exists else 'append'
+
     try:
-        if cols_type is None:
-            data.to_sql(name=table_name, con=engine_mysql, schema=to_db, if_exists='append',
-                        index=write_index, )
-        elif not cols_type:
-            data.to_sql(name=table_name, con=engine_mysql, schema=to_db, if_exists='append',
-                        dtype={col_name: NVARCHAR(255) for col_name in col_name_list}, index=write_index, )
+        if cols_type is None or not cols_type:
+            # 表不存在时用 replace 创建（带 NVARCHAR 列类型）
+            dtype = {col_name: NVARCHAR(255) for col_name in col_name_list} if not table_exists else None
+            data.to_sql(name=table_name, con=engine_mysql, schema=to_db, if_exists=if_exists,
+                        dtype=dtype, index=write_index)
         else:
-            data.to_sql(name=table_name, con=engine_mysql, schema=to_db, if_exists='append',
-                        dtype=cols_type, index=write_index, )
+            data.to_sql(name=table_name, con=engine_mysql, schema=to_db, if_exists=if_exists,
+                        dtype=cols_type, index=write_index)
     except Exception as e:
         logging.error(f"database.insert_other_db_from_df处理异常：{table_name}表{e}")
 

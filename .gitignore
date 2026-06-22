@@ -160,3 +160,13 @@ cython_debug/
 cache/
 log/
 test/
+data/
+check_*.py
+compare_*.py
+debug_job.py
+fetch_data.py
+run_job*.py
+test_save.py
+fill_*_strategies.py
+fill_spot_buy*.py
+docker_check.py
