@@ -97,10 +97,12 @@ def _normalize_akshare_spot(df: pd.DataFrame) -> pd.DataFrame:
     available_cols = {k: v for k, v in column_mapping.items() if k in df.columns}
     df = df.rename(columns=available_cols)
 
-    # 处理 symbol 列（可能是 sh600519 或 600519 格式）
+    # 处理 symbol 列（可能是 sh600519 或 600519 格式，也可能是整数）
     if 'code' in df.columns:
+        # 先转为字符串
+        df['code'] = df['code'].astype(str)
         # 如果是 sh600519 格式，提取出 600519
-        df['code'] = df['code'].astype(str).str.replace(r'^[a-z]{2}', '', regex=True)
+        df['code'] = df['code'].str.replace(r'^[a-z]{2}', '', regex=True)
         df['code'] = df['code'].str.zfill(6)
 
     # 过滤非 A 股（只保留 0/3/6/8/9 开头的 6 位代码）

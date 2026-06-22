@@ -147,26 +147,45 @@ def fetch_etfs(date):
     return None
 
 
+# 检查数据有效性：至少有 50% 的股票有非零价格
+def _check_spot_data_valid(data):
+    if data is None or len(data) == 0:
+        return False
+    # 检查 new_price 列非零比例
+    try:
+        if 'new_price' in data.columns:
+            valid_count = data['new_price'].apply(lambda x: float(x) > 0 if pd.notna(x) else False).sum()
+            valid_ratio = valid_count / len(data)
+            return valid_ratio > 0.5  # 至少 50% 有效
+    except:
+        pass
+    return False
+
+
 # 读取当天股票数据
 def fetch_stocks(date):
     # 1) 优先使用新浪实时行情
     try:
         data = sss.stock_zh_a_spot_sina()
         if data is not None and len(data.index) > 0:
-            if date is None:
-                data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+            # 检查数据有效性
+            if not _check_spot_data_valid(data):
+                logging.warning("fetch_stocks: 新浪实时行情数据无效(全0)，尝试 AKShare")
             else:
-                data.insert(0, 'date', date.strftime("%Y-%m-%d"))
-            # 填充缺失的列为 0（新浪数据源字段较少）
-            required_cols = list(tbs.TABLE_CN_STOCK_SPOT['columns'].keys())
-            for col in required_cols:
-                if col not in data.columns:
-                    data[col] = 0
-            # 调整列顺序以匹配表结构
-            data = data[required_cols]
-            data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
-            logging.info(f"fetch_stocks: 新浪实时行情获取成功 {len(data)} 条")
-            return data
+                if date is None:
+                    data.insert(0, 'date', datetime.datetime.now().strftime("%Y-%m-%d"))
+                else:
+                    data.insert(0, 'date', date.strftime("%Y-%m-%d"))
+                # 填充缺失的列为 0（新浪数据源字段较少）
+                required_cols = list(tbs.TABLE_CN_STOCK_SPOT['columns'].keys())
+                for col in required_cols:
+                    if col not in data.columns:
+                        data[col] = 0
+                # 调整列顺序以匹配表结构
+                data = data[required_cols]
+                data = data.loc[data['code'].apply(is_a_stock)].loc[data['new_price'].apply(is_open)]
+                logging.info(f"fetch_stocks: 新浪实时行情获取成功 {len(data)} 条")
+                return data
         logging.warning("fetch_stocks: 新浪实时行情获取失败，尝试 AKShare")
     except Exception as e:
         logging.warning(f"stockfetch.fetch_stocks 新浪异常：{e}")
